@@ -60,6 +60,7 @@ var (
 	lib      *SoundLibrary
 	catOrder []string
 	catMap   map[string][]Sound
+	soundsPageHTML string // pre-rendered HTML
 )
 
 func loadSoundLibrary() error {
@@ -87,7 +88,184 @@ func loadSoundLibrary() error {
 	sort.Strings(catOrder)
 
 	log.Printf("biblioteca carregada: %d sons em %d categorias", len(l.Sounds), len(catOrder))
+
+	// Pré-renderizar página /sounds (cache estático)
+	soundsPageHTML = renderSoundsPage()
 	return nil
+}
+
+// renderSoundsPage gera o HTML completo da página /sounds (executado 1x na inicialização)
+func renderSoundsPage() string {
+	var catHTML strings.Builder
+	for _, cat := range catOrder {
+		sounds := catMap[cat]
+		catID := strings.ReplaceAll(strings.ToLower(cat), "/", "-")
+		catID = strings.ReplaceAll(catID, "_", "-")
+
+		catHTML.WriteString(fmt.Sprintf(`
+<details>
+<summary class="cat-header">
+  <span class="cat-name">%s</span>
+  <span class="cat-count">%d sons</span>
+</summary>
+<div class="cat-sounds" id="cat-%s">
+<table>
+<tr><th>Som</th><th>Duração</th><th>Player</th><th>Alexa</th></tr>
+`, escapeHTML(cat), len(sounds), catID))
+
+		for _, s := range sounds {
+			audioURL := fmt.Sprintf("/audio/%s.%s", s.AudioPath, lib.FileType)
+			dur := fmt.Sprintf("%.1fs", s.Duration)
+			soundbankURL := lib.BaseURL.SoundBank + s.AudioPath
+
+			btnTest := fmt.Sprintf(`<button class="btn" onclick="testar('%s', this)" title="Tocar na Alexa">🔊 Testar</button>`, escapeJSStr(soundbankURL))
+			player := fmt.Sprintf(`<audio controls preload="none"><source src="%s" type="audio/mpeg"></audio>`, escapeHTML(audioURL))
+
+			catHTML.WriteString(fmt.Sprintf(`<tr><td><strong>%s</strong></td><td>%s</td><td>%s</td><td>%s</td></tr>
+`, escapeHTML(s.Name), dur, player, btnTest))
+		}
+
+		catHTML.WriteString(`</table></div></details>`)
+	}
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>voice-pipe — Biblioteca de Sons</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         max-width: 960px; margin: 20px auto; padding: 0 16px;
+         background: #0d1117; color: #c9d1d9; line-height: 1.5; font-size: 14px; }
+  h1 { color: #58a6ff; font-size: 1.5em; display: flex; align-items: center; gap: 12px; }
+  h1 small { font-size: 0.6em; color: #8b949e; font-weight: normal; }
+  a { color: #58a6ff; }
+  a:hover { text-decoration: underline; }
+
+  .cat-header {
+    background: #161b22; padding: 10px 16px; border-radius: 8px;
+    cursor: pointer; display: flex; align-items: center; gap: 12px;
+    margin: 4px 0; user-select: none; font-size: 14px; font-weight: 600;
+    border: 1px solid #30363d; transition: background 0.15s;
+  }
+  .cat-header:hover { background: #1c2333; }
+  .cat-name { flex: 1; color: #e6edf3; }
+  .cat-count { color: #8b949e; font-size: 0.85em; font-weight: normal; }
+  details[open] .cat-header { border-radius: 8px 8px 0 0; border-bottom: none; }
+
+  table { width: 100%%; border-collapse: collapse; }
+  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #21262d;
+           vertical-align: middle; }
+  th { color: #8b949e; font-weight: 600; font-size: 0.8em; text-transform: uppercase;
+       background: #0d1117; position: sticky; top: 0; }
+  tr:hover { background: #161b22; }
+  tr:last-child td { border-bottom: none; }
+
+  .cat-sounds { background: #0d1117; border: 1px solid #30363d; border-top: none;
+                border-radius: 0 0 8px 8px; overflow: hidden; }
+
+  .btn { background: #1f6feb; color: #fff; border: none; padding: 4px 10px;
+         border-radius: 6px; cursor: pointer; font-size: 0.85em;
+         white-space: nowrap; transition: background 0.15s; }
+  .btn:hover { background: #388bfd; }
+  .btn:disabled { opacity: 0.5; cursor: wait; }
+  .btn.ok { background: #238636; }
+  .btn.err { background: #da3633; }
+
+  audio { height: 32px; width: 180px; }
+  audio::-webkit-media-controls-panel { background: #161b22; }
+
+  hr { border: none; border-top: 1px solid #30363d; margin: 20px 0; }
+
+  .search-box {
+    width: 100%%; padding: 10px 14px; border-radius: 8px; border: 1px solid #30363d;
+    background: #161b22; color: #c9d1d9; font-size: 14px; margin: 8px 0 16px;
+    box-sizing: border-box;
+  }
+  .search-box:focus { outline: none; border-color: #388bfd; }
+
+  .stats { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
+  .stat { background: #161b22; padding: 6px 14px; border-radius: 6px;
+           border: 1px solid #30363d; font-size: 0.85em; color: #8b949e; }
+  .stat strong { color: #e6edf3; }
+
+  @media (max-width: 700px) {
+    body { font-size: 13px; padding: 0 8px; }
+    audio { width: 120px; }
+    .cat-header { font-size: 13px; }
+  }
+</style>
+</head>
+<body>
+<h1>🔊 Biblioteca de Sons <small>voice-pipe v%s</small></h1>
+<p><a href="/" style="color:#8b949e;">← Voltar</a></p>
+
+<div class="stats">
+  <span class="stat">📁 <strong>%d</strong> categorias</span>
+  <span class="stat">🎵 <strong>%d</strong> sons</span>
+</div>
+
+<input type="text" class="search-box" id="search" placeholder="Buscar sons..." oninput="filterSounds()">
+
+<div id="sounds-container">
+%s
+</div>
+
+<script>
+function testar(value, btn) {
+  btn.disabled = true;
+  btn.textContent = '⏳';
+  btn.className = 'btn';
+  fetch('/speak', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ text: 'Teste de som', chime: value || undefined })
+  })
+  .then(r => r.json())
+  .then(data => {
+    if (data.success) { btn.textContent = '✅'; btn.className = 'btn ok'; }
+    else { btn.textContent = '❌'; btn.className = 'btn err'; }
+    setTimeout(() => { btn.textContent = '🔊 Testar'; btn.className = 'btn'; btn.disabled = false; }, 2500);
+  })
+  .catch(() => {
+    btn.textContent = '❌'; btn.className = 'btn err';
+    setTimeout(() => { btn.textContent = '🔊 Testar'; btn.className = 'btn'; btn.disabled = false; }, 2500);
+  });
+}
+
+function filterSounds() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const details = document.querySelectorAll('details');
+  details.forEach(d => {
+    const rows = d.querySelectorAll('tr:not(:first-child)');
+    let hasMatch = false;
+    rows.forEach(row => {
+      const text = row.textContent.toLowerCase();
+      if (text.includes(q)) {
+        row.style.display = '';
+        hasMatch = true;
+      } else {
+        row.style.display = 'none';
+      }
+    });
+    if (q === '' || hasMatch) {
+      d.style.display = '';
+      if (q !== '' && hasMatch) d.open = true;
+    } else {
+      d.style.display = 'none';
+    }
+  });
+}
+</script>
+
+<hr>
+<p style="color:#8b949e;font-size:0.85em;">
+  🔊 voice-pipe — Sons disponíveis localmente
+</p>
+</body>
+</html>`,
+		version, len(catOrder), len(lib.Sounds), catHTML.String())
 }
 
 // ── Voice Monkey ───────────────────────────────────────────────────────
@@ -185,186 +363,15 @@ func handleSounds(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-
-	// Build categories HTML
-	var catHTML strings.Builder
-	for _, cat := range catOrder {
-		sounds := catMap[cat]
-		catID := strings.ReplaceAll(strings.ToLower(cat), "/", "-")
-		catID = strings.ReplaceAll(catID, "_", "-")
-
-		catHTML.WriteString(fmt.Sprintf(`
-<details>
-<summary class="cat-header" onclick="toggleCat('%s')">
-  <span class="cat-name">%s</span>
-  <span class="cat-count">%d sons</span>
-</summary>
-<div class="cat-sounds" id="cat-%s">
-<table>
-<tr><th>Som</th><th>Duração</th><th>Player</th><th>Alexa</th></tr>
-`, catID, cat, len(sounds), catID))
-
-		for _, s := range sounds {
-			audioURL := fmt.Sprintf("/audio/%s.%s", s.AudioPath, lib.FileType)
-			dur := fmt.Sprintf("%.1fs", s.Duration)
-			// soundbank URL from the JSON base
-			soundbankURL := lib.BaseURL.SoundBank + s.AudioPath
-
-			btnTest := fmt.Sprintf(`<button class="btn" onclick="testar('%s', this)" title="Tocar na Alexa">🔊 Testar</button>`, escapeJSStr(soundbankURL))
-			player := fmt.Sprintf(`<audio controls preload="none"><source src="%s" type="audio/mpeg"></audio>`, escapeHTML(audioURL))
-
-			catHTML.WriteString(fmt.Sprintf(`<tr><td><strong>%s</strong></td><td>%s</td><td>%s</td><td>%s</td></tr>
-`, escapeHTML(s.Name), dur, player, btnTest))
-		}
-
-		catHTML.WriteString(`</table></div></details>`)
-	}
-
-	html := fmt.Sprintf(`<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>voice-pipe — Biblioteca de Sons</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-         max-width: 960px; margin: 20px auto; padding: 0 16px;
-         background: #0d1117; color: #c9d1d9; line-height: 1.5; font-size: 14px; }
-  h1 { color: #58a6ff; font-size: 1.5em; display: flex; align-items: center; gap: 12px; }
-  h1 small { font-size: 0.6em; color: #8b949e; font-weight: normal; }
-  a { color: #58a6ff; }
-  a:hover { text-decoration: underline; }
-
-  .cat-header {
-    background: #161b22; padding: 10px 16px; border-radius: 8px;
-    cursor: pointer; display: flex; align-items: center; gap: 12px;
-    margin: 4px 0; user-select: none; font-size: 14px; font-weight: 600;
-    border: 1px solid #30363d; transition: background 0.15s;
-  }
-  .cat-header:hover { background: #1c2333; }
-  .cat-name { flex: 1; color: #e6edf3; }
-  .cat-count { color: #8b949e; font-size: 0.85em; font-weight: normal; }
-  details[open] .cat-header { border-radius: 8px 8px 0 0; border-bottom: none; }
-
-  table { width: 100%; border-collapse: collapse; }
-  th, td { padding: 6px 10px; text-align: left; border-bottom: 1px solid #21262d;
-           vertical-align: middle; }
-  th { color: #8b949e; font-weight: 600; font-size: 0.8em; text-transform: uppercase;
-       background: #0d1117; position: sticky; top: 0; }
-  tr:hover { background: #161b22; }
-  tr:last-child td { border-bottom: none; }
-
-  .cat-sounds { background: #0d1117; border: 1px solid #30363d; border-top: none;
-                border-radius: 0 0 8px 8px; overflow: hidden; }
-
-  .btn { background: #1f6feb; color: #fff; border: none; padding: 4px 10px;
-         border-radius: 6px; cursor: pointer; font-size: 0.85em;
-         white-space: nowrap; transition: background 0.15s; }
-  .btn:hover { background: #388bfd; }
-  .btn:disabled { opacity: 0.5; cursor: wait; }
-  .btn.ok { background: #238636; }
-  .btn.err { background: #da3633; }
-
-  audio { height: 32px; width: 180px; }
-  audio::-webkit-media-controls-panel { background: #161b22; }
-
-  hr { border: none; border-top: 1px solid #30363d; margin: 20px 0; }
-
-  .search-box {
-    width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #30363d;
-    background: #161b22; color: #c9d1d9; font-size: 14px; margin: 8px 0 16px;
-    box-sizing: border-box;
-  }
-  .search-box:focus { outline: none; border-color: #388bfd; }
-
-  .stats { display: flex; gap: 16px; flex-wrap: wrap; margin: 12px 0; }
-  .stat { background: #161b22; padding: 6px 14px; border-radius: 6px;
-           border: 1px solid #30363d; font-size: 0.85em; color: #8b949e; }
-  .stat strong { color: #e6edf3; }
-
-  @media (max-width: 700px) {
-    body { font-size: 13px; padding: 0 8px; }
-    audio { width: 120px; }
-    .cat-header { font-size: 13px; }
-  }
-</style>
-</head>
-<body>
-<h1>🔊 Biblioteca de Sons <small>voice-pipe v%s</small></h1>
-<p><a href="/" style="color:#8b949e;">← Voltar</a></p>
-
-<div class="stats">
-  <span class="stat">📁 <strong>%d</strong> categorias</span>
-  <span class="stat">🎵 <strong>%d</strong> sons</span>
-</div>
-
-<input type="text" class="search-box" id="search" placeholder="Buscar sons..." oninput="filterSounds()">
-
-<div id="sounds-container">
-%s
-</div>
-
-<script>
-function testar(value, btn) {
-  btn.disabled = true;
-  btn.textContent = '⏳';
-  btn.className = 'btn';
-  fetch('/speak', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ text: 'Teste de som', chime: value || undefined })
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.success) { btn.textContent = '✅'; btn.className = 'btn ok'; }
-    else { btn.textContent = '❌'; btn.className = 'btn err'; }
-    setTimeout(() => { btn.textContent = '🔊 Testar'; btn.className = 'btn'; btn.disabled = false; }, 2500);
-  })
-  .catch(() => {
-    btn.textContent = '❌'; btn.className = 'btn err';
-    setTimeout(() => { btn.textContent = '🔊 Testar'; btn.className = 'btn'; btn.disabled = false; }, 2500);
-  });
-}
-
-function filterSounds() {
-  const q = document.getElementById('search').value.toLowerCase();
-  const details = document.querySelectorAll('details');
-  details.forEach(d => {
-    const rows = d.querySelectorAll('tr:not(:first-child)');
-    let hasMatch = false;
-    rows.forEach(row => {
-      const text = row.textContent.toLowerCase();
-      if (text.includes(q)) {
-        row.style.display = '';
-        hasMatch = true;
-      } else {
-        row.style.display = 'none';
-      }
-    });
-    // Show category if any match or search is empty
-    if (q === '' || hasMatch) {
-      d.style.display = '';
-      if (q !== '' && hasMatch) d.open = true;
-    } else {
-      d.style.display = 'none';
-    }
-  });
-}
-</script>
-
-<hr>
-<p style="color:#8b949e;font-size:0.85em;">
-  🔊 voice-pipe — Sons disponíveis localmente | 
-  <a href="/sounds">player no navegador</a> + 
-  <a href="javascript:void(0)" onclick="document.querySelectorAll('.btn').forEach(b=>b.click())">testar todos na Alexa</a>
-</p>
-</body>
-</html>`,
-		version, len(catOrder), len(lib.Sounds), catHTML.String())
-
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(html))
+	w.Write([]byte(soundsPageHTML))
+}
+
+func handleSoundsJSON(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	json.NewEncoder(w).Encode(lib)
 }
 
 func escapeHTML(s string) string {
@@ -510,6 +517,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleIndex)
 	mux.HandleFunc("/sounds", handleSounds)
+	mux.HandleFunc("/sounds.json", handleSoundsJSON)
 	mux.HandleFunc("/speak", handleSpeak)
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/audio/", handleAudio)

@@ -1,0 +1,19 @@
+# Binários
+voice-pipe
+*.exe
+*.test
+
+# Env
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MP3 downloads (regenerated from JSON)
+sounds/downloaded/
